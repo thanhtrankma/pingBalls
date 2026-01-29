@@ -498,10 +498,20 @@ export default function BallsPing() {
           audioEnabled: audioEnabled
         });
         
-        // Nếu audio chưa được enable, thông báo cho user
-        if (!audioEnabled) {
-          alert('Vui lòng click vào overlay để bật âm thanh trước khi ghi hình!');
-          return;
+        // Nếu audio chưa được enable, thử resume AudioContext tự động
+        if (!audioEnabled && audioCtx) {
+          try {
+            if (audioCtx.state !== 'running') {
+              await audioCtx.resume();
+              setAudioEnabled(true);
+              console.log('AudioContext đã được resume tự động');
+            } else {
+              setAudioEnabled(true);
+            }
+          } catch (e) {
+            // Nếu không resume được, vẫn tiếp tục với recording (chỉ không có audio)
+            console.warn('Không thể resume AudioContext tự động, tiếp tục recording không audio:', e);
+          }
         }
       }
 
@@ -681,17 +691,18 @@ export default function BallsPing() {
     initGame(p5Instance);
     
     // Tự động bắt đầu recording mới sau khi reset
+    // Không cần kiểm tra audioEnabled vì startRecording sẽ tự xử lý
     setTimeout(async () => {
-      if (audioEnabled) {
-        try {
-          console.log('Tự động bắt đầu recording sau khi reset...');
-          await startRecording();
-          console.log('Recording đã bắt đầu thành công');
-        } catch (error) {
-          console.error('Lỗi khi tự động bắt đầu recording:', error);
+      try {
+        console.log('Tự động bắt đầu recording sau khi reset...');
+        await startRecording();
+        console.log('Recording đã bắt đầu thành công');
+      } catch (error) {
+        console.error('Lỗi khi tự động bắt đầu recording:', error);
+        // Nếu lỗi do audio chưa enable, không hiển thị alert (để không làm phiền user)
+        if (!error.message || !error.message.includes('audio')) {
+          // Chỉ hiển thị alert cho các lỗi khác
         }
-      } else {
-        console.log('Audio chưa được enable, không thể tự động bắt đầu recording');
       }
     }, 300); // Đợi một chút để game khởi tạo xong
   };
