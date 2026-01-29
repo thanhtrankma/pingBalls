@@ -147,6 +147,7 @@ export default function BallsPing() {
   const audioStreamRef = useRef(null);
   const audioDestinationRef = useRef(null);
   const isRecordingRef = useRef(false);
+  const currentMimeTypeRef = useRef('video/webm'); // Lưu mimeType hiện tại
 
   useEffect(() => {
     let isMounted = true;
@@ -524,19 +525,32 @@ export default function BallsPing() {
       }
 
       // Tạo MediaRecorder với chất lượng cao nhất
+      // Ưu tiên MP4/H.264 nếu được hỗ trợ, nếu không thì fallback về WebM
       const options = {
-        mimeType: 'video/webm;codecs=vp9,opus', // VP9 + Opus cho video và audio
         videoBitsPerSecond: 10000000, // 10 Mbps - chất lượng rất cao
         audioBitsPerSecond: 192000, // 192 kbps cho audio chất lượng cao
       };
 
-      // Fallback nếu VP9 không được hỗ trợ
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options.mimeType = 'video/webm;codecs=vp8';
-        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-          options.mimeType = 'video/webm';
+      // Thử các định dạng theo thứ tự ưu tiên
+      const supportedTypes = [
+        'video/mp4;codecs=h264,aac', // MP4 với H.264 và AAC
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2', // MP4 với H.264 và AAC (format khác)
+        'video/webm;codecs=vp9,opus', // WebM với VP9 và Opus
+        'video/webm;codecs=vp8,opus', // WebM với VP8 và Opus
+        'video/webm', // WebM cơ bản
+      ];
+
+      let selectedMimeType = 'video/webm'; // Fallback mặc định
+      for (const mimeType of supportedTypes) {
+        if (MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          console.log('Đã chọn định dạng:', mimeType);
+          break;
         }
       }
+
+      options.mimeType = selectedMimeType;
+      currentMimeTypeRef.current = selectedMimeType; // Lưu mimeType để dùng trong onstop
 
       // Kiểm tra stream có audio track không
       console.log('Combined stream tracks:', {
@@ -562,13 +576,18 @@ export default function BallsPing() {
       mediaRecorder.onstop = () => {
         // Chỉ lưu nếu có dữ liệu (không phải cancel)
         if (recordedChunksRef.current.length > 0) {
-          const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+          // Xác định loại file dựa trên mimeType đã chọn
+          const mimeType = currentMimeTypeRef.current;
+          const isMP4 = mimeType.includes('mp4');
+          const blobType = isMP4 ? 'video/mp4' : 'video/webm';
+          const blob = new Blob(recordedChunksRef.current, { type: blobType });
           
           // Tạo tên file tự động dựa trên số lượng bóng và tốc độ
           const numBalls = ballSlider ? ballSlider.value() : 6;
           const speed = speedSlider ? speedSlider.value() : 5;
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-          const filename = `ballsPing_${numBalls}balls_speed${speed}_${timestamp}.webm`;
+          const fileExtension = isMP4 ? 'mp4' : 'webm';
+          const filename = `ballsPing_${numBalls}balls_speed${speed}_${timestamp}.${fileExtension}`;
 
           // Tạo download link
           const url = URL.createObjectURL(blob);
