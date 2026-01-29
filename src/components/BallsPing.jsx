@@ -240,6 +240,14 @@ export default function BallsPing() {
         p5Instance.drawingContext.shadowColor = 'rgba(255, 255, 255, 0.3)';
         
         p5Instance.text(timeText, 0, 0);
+        
+        // Hiển thị watermark dưới thời gian
+        p5Instance.textSize(16); // Text nhỏ
+        p5Instance.fill(255, 255, 255, 15); // Màu trắng với opacity thấp hơn (mờ hơn)
+        p5Instance.drawingContext.shadowBlur = 10;
+        p5Instance.drawingContext.shadowColor = 'rgba(255, 255, 255, 0.2)';
+        p5Instance.text('Ping balls in Viet Nam', 0, 50); // Dưới thời gian 50px
+        
         p5Instance.pop();
 
         // Vẽ vòng tròn phát sáng khi va chạm
