@@ -179,7 +179,7 @@ export default function BallsPing() {
         resetButton = p5Instance.createButton('Bắt đầu lại (Reset)');
         resetButton.position(350, 640);
         resetButton.size(150, 40);
-        resetButton.mousePressed(() => initGame(p5Instance));
+        resetButton.mousePressed(() => handleReset(p5Instance));
 
         // Lưu hàm resume audio để gọi từ overlay
         const audioCtx = p5Instance.getAudioContext();
@@ -542,23 +542,26 @@ export default function BallsPing() {
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        
-        // Tạo tên file tự động dựa trên số lượng bóng và tốc độ
-        const numBalls = ballSlider ? ballSlider.value() : 6;
-        const speed = speedSlider ? speedSlider.value() : 5;
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-        const filename = `ballsPing_${numBalls}balls_speed${speed}_${timestamp}.webm`;
+        // Chỉ lưu nếu có dữ liệu (không phải cancel)
+        if (recordedChunksRef.current.length > 0) {
+          const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+          
+          // Tạo tên file tự động dựa trên số lượng bóng và tốc độ
+          const numBalls = ballSlider ? ballSlider.value() : 6;
+          const speed = speedSlider ? speedSlider.value() : 5;
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+          const filename = `ballsPing_${numBalls}balls_speed${speed}_${timestamp}.webm`;
 
-        // Tạo download link
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+          // Tạo download link
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
 
         // Cleanup
         if (canvasStreamRef.current) {
@@ -590,14 +593,24 @@ export default function BallsPing() {
           }
           audioDestinationRef.current = null;
         }
+        
+        // Reset recorded chunks sau khi xử lý
+        recordedChunksRef.current = [];
       };
 
       mediaRecorder.start(100); // Ghi mỗi 100ms để đảm bảo không mất dữ liệu
-      setIsRecording(true);
+      
+      // Cập nhật state ngay lập tức để UI hiển thị đúng
       isRecordingRef.current = true;
+      setIsRecording(true);
+      
+      console.log('Recording đã bắt đầu, isRecording:', true);
     } catch (error) {
       console.error('Lỗi khi bắt đầu recording:', error);
       alert('Không thể bắt đầu recording. Vui lòng thử lại.');
+      // Đảm bảo state được reset nếu có lỗi
+      setIsRecording(false);
+      isRecordingRef.current = false;
     }
   };
 
@@ -609,37 +622,112 @@ export default function BallsPing() {
     }
   };
 
+  const cancelRecording = () => {
+    // Hủy recording hiện tại mà không lưu
+    if (mediaRecorderRef.current && isRecordingRef.current) {
+      // Clear recorded chunks trước để onstop không lưu file
+      recordedChunksRef.current = [];
+      
+      try {
+        // Stop recording - onstop sẽ không lưu vì chunks đã bị clear
+        mediaRecorderRef.current.stop();
+      } catch (e) {
+        console.warn('Lỗi khi hủy recording:', e);
+      }
+      
+      // Cleanup streams
+      if (canvasStreamRef.current) {
+        canvasStreamRef.current.getTracks().forEach(track => track.stop());
+        canvasStreamRef.current = null;
+      }
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(track => track.stop());
+        audioStreamRef.current = null;
+      }
+      if (audioDestinationRef.current) {
+        const audioCtx = p5InstanceRef.current?.audioContext;
+        if (osc && osc.output && audioDestinationRef.current.masterGain && audioCtx) {
+          try {
+            osc.output.disconnect();
+            osc.output.connect(audioCtx.destination);
+          } catch (e) {
+            // Ignore
+          }
+        }
+        if (audioDestinationRef.current.masterGain) {
+          audioDestinationRef.current.masterGain.disconnect();
+        }
+        if (audioDestinationRef.current.scriptProcessor) {
+          audioDestinationRef.current.scriptProcessor.disconnect();
+        }
+        audioDestinationRef.current = null;
+      }
+      
+      setIsRecording(false);
+      isRecordingRef.current = false;
+      mediaRecorderRef.current = null;
+    }
+  };
+
+  const handleReset = async (p5Instance) => {
+    // Nếu đang recording, hủy recording cũ
+    if (isRecordingRef.current) {
+      cancelRecording();
+      // Đợi một chút để cleanup hoàn tất và state được cập nhật
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // Reset game
+    initGame(p5Instance);
+    
+    // Tự động bắt đầu recording mới sau khi reset
+    setTimeout(async () => {
+      if (audioEnabled) {
+        try {
+          console.log('Tự động bắt đầu recording sau khi reset...');
+          await startRecording();
+          console.log('Recording đã bắt đầu thành công');
+        } catch (error) {
+          console.error('Lỗi khi tự động bắt đầu recording:', error);
+        }
+      } else {
+        console.log('Audio chưa được enable, không thể tự động bắt đầu recording');
+      }
+    }, 300); // Đợi một chút để game khởi tạo xong
+  };
+
   return (
     <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', flexDirection: 'column', alignItems: 'center' }}>
       <div ref={sketchRef} />
       
-      {/* Recording Controls */}
-      <div style={{ 
-        marginTop: '10px', 
-        display: 'flex', 
-        gap: '10px',
-        zIndex: 100
-      }}>
-        {!isRecording ? (
-          <button
-            onClick={startRecording}
-            style={{
-              padding: '10px 20px',
-              fontSize: '16px',
-              backgroundColor: '#e74c3c',
-              color: 'white',
-              border: 'none',
-              borderRadius: '5px',
-              cursor: 'pointer',
-              fontWeight: 'bold',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-            }}
-            onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
-            onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
-          >
-            🔴 Bắt đầu ghi hình
-          </button>
-        ) : (
+      {/* Recording Controls - Chỉ hiển thị khi đã bật audio */}
+      {audioEnabled && (
+        <div style={{ 
+          marginTop: '10px', 
+          display: 'flex', 
+          gap: '10px',
+          zIndex: 100
+        }}>
+          {!isRecording ? (
+            <button
+              onClick={startRecording}
+              style={{
+                padding: '10px 20px',
+                fontSize: '16px',
+                backgroundColor: '#e74c3c',
+                color: 'white',
+                border: 'none',
+                borderRadius: '5px',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
+              }}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#c0392b'}
+              onMouseOut={(e) => e.target.style.backgroundColor = '#e74c3c'}
+            >
+              🔴 Bắt đầu ghi hình
+            </button>
+          ) : (
           <button
             onClick={stopRecording}
             style={{
@@ -681,8 +769,9 @@ export default function BallsPing() {
             }}></span>
             Đang ghi...
           </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {!audioEnabled && (
         <div
