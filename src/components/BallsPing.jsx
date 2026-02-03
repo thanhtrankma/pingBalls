@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import p5 from 'p5';
 
 let balls = [];
@@ -154,6 +155,8 @@ export default function BallsPing() {
 
     const sketch = (p5Instance) => {
       p5Instance.setup = () => {
+        // Gán ref ngay đầu setup() vì setup() chạy trong new p5() nên ref chưa được gán từ bên ngoài
+        p5InstanceRef.current = p5Instance;
         p5Instance.createCanvas(600, 700);
         circleGlowColor = p5Instance.color(255);
 
@@ -300,7 +303,26 @@ export default function BallsPing() {
         await import('p5/lib/addons/p5.sound');
       }
       if (!isMounted) return;
-      p5InstanceRef.current = new p5(sketch, sketchRef.current);
+      // Đợi DOM/ref sẵn sàng (khi navigate từ trang chủ, ref có thể chưa gắn ngay)
+      await new Promise((r) => requestAnimationFrame(r));
+      if (!isMounted) return;
+      await new Promise((r) => setTimeout(r, 0));
+      if (!isMounted) return;
+
+      let container = sketchRef.current;
+      if (!container) {
+        for (let i = 0; i < 20; i++) {
+          await new Promise((r) => setTimeout(r, 50));
+          if (!isMounted) return;
+          container = sketchRef.current;
+          if (container) break;
+        }
+      }
+      if (!container) {
+        console.error('BallsPing: không tìm thấy container');
+        return;
+      }
+      p5InstanceRef.current = new p5(sketch, container);
     })();
 
     return () => {
@@ -345,11 +367,26 @@ export default function BallsPing() {
       
       if (p5InstanceRef.current) {
         p5InstanceRef.current.remove();
+        p5InstanceRef.current = null;
       }
       if (osc) {
-        osc.stop();
-        osc.dispose();
+        try {
+          osc.stop();
+          osc.dispose();
+        } catch (e) {
+          console.warn('Cleanup osc:', e);
+        }
+        osc = null;
       }
+      
+      // Reset toàn bộ biến toàn cục để lần vào game sau không bị stale reference
+      balls = [];
+      ballSlider = null;
+      speedSlider = null;
+      resetButton = null;
+      circleGlowColor = undefined;
+      circleGlowIntensity = 0;
+      startTime = null;
     };
   }, []);
 
@@ -361,15 +398,19 @@ export default function BallsPing() {
 
   const startRecording = async () => {
     try {
-      if (!p5InstanceRef.current) {
-        alert('Canvas chưa sẵn sàng. Vui lòng đợi một chút.');
-        return;
+      // Chờ canvas sẵn sàng (p5 load async nên có thể chưa có ngay)
+      const maxRetries = 15;
+      const retryDelay = 200;
+      let canvas = null;
+      for (let i = 0; i < maxRetries; i++) {
+        if (p5InstanceRef.current?.canvas) {
+          canvas = p5InstanceRef.current.canvas;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, retryDelay));
       }
-
-      // Lấy canvas element từ p5 instance
-      const canvas = p5InstanceRef.current.canvas;
       if (!canvas) {
-        alert('Canvas chưa sẵn sàng. Vui lòng đợi một chút.');
+        alert('Canvas chưa sẵn sàng. Vui lòng đợi một chút rồi thử lại.');
         return;
       }
       
@@ -736,6 +777,35 @@ export default function BallsPing() {
 
   return (
     <div style={{ position: 'relative', display: 'flex', justifyContent: 'center', flexDirection: 'column', alignItems: 'center' }}>
+      {/* Header cố định phía trên canvas */}
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 600,
+          padding: '10px 20px',
+          display: 'flex',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+          backgroundColor: 'rgba(10, 10, 10, 0.95)',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          boxSizing: 'border-box',
+        }}
+      >
+        <Link
+          to="/"
+          style={{
+            padding: '8px 16px',
+            fontSize: '14px',
+            backgroundColor: 'rgba(255,255,255,0.08)',
+            color: 'white',
+            textDecoration: 'none',
+            borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.15)',
+          }}
+        >
+          ← Về trang chủ
+        </Link>
+      </div>
       <div ref={sketchRef} />
       
       {/* Recording Controls - Chỉ hiển thị khi đã bật audio */}
